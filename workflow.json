@@ -1,0 +1,258 @@
+{
+  "name": "AI Lead Qualifier & CRM Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-form",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "27419c6d-a115-41ba-9298-5466e78cb697",
+      "name": "Lead Form Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7f11f253-112b-4a9e-a57c-10b9113c5394",
+              "name": "name",
+              "type": "string",
+              "value": "={{ $json.body.name }}"
+            },
+            {
+              "id": "a59d6d33-aa3b-42b2-b66c-147e848dac44",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "id": "64899efe-fa61-4a2c-a2eb-f7dccfac9d8a",
+              "name": "company",
+              "type": "string",
+              "value": "={{ $json.body.company }}"
+            },
+            {
+              "id": "2868ae0a-b1a7-4004-98d2-8f92725ce479",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.body.message }}"
+            },
+            {
+              "id": "fa7691f4-c92d-4c95-b04c-b73677986f02",
+              "name": "budget",
+              "type": "string",
+              "value": "={{ $json.body.budget }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ff09d9fc-850a-4728-a785-c9a9b40a7e78",
+      "name": "Normalise Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"You are a B2B sales analyst. Reply with JSON only: {score: 0-100, category: 'hot'|'warm'|'cold', reason: string, follow_up_email: string}. Score on company fit, budget clarity, urgency and intent in the message.\" },\n    { \"role\": \"user\", \"content\": \"Name: {{ $json.name }}\\nEmail: {{ $json.email }}\\nCompany: {{ $json.company }}\\nBudget: {{ $json.budget }}\\nMessage: {{ $json.message }}\" }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0d40bc6b-d35a-418e-a8c2-0274e20a9665",
+      "name": "AI Score & Qualify (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\nconst ai = JSON.parse(raw);\nconst lead = $('Normalise Lead').first().json;\nreturn [{ json: { ...lead, score: ai.score, category: ai.category, reason: ai.reason, follow_up_email: ai.follow_up_email, received_at: new Date().toISOString() } }];"
+      },
+      "id": "2e2d3952-00d0-4dd6-9580-0aac145a2e5d",
+      "name": "Parse AI Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "7165420c-7b81-44a9-af1d-1d78b7046e4d",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "largerEqual"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a83dbcc1-19a2-4e97-b261-08665882a7b4",
+      "name": "Hot Lead? (score >= 70)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "options": {}
+      },
+      "id": "27eb677b-b52c-4d13-a240-91c442de4a86",
+      "name": "Save Lead to CRM Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "post",
+        "channel": "#sales",
+        "text": "=Hot lead (score {{ $json.score }}): {{ $json.name }} from {{ $json.company }} - {{ $json.reason }}",
+        "options": {}
+      },
+      "id": "a2ae06c1-fd58-4957-ab1f-fa3f7ac0f084",
+      "name": "Slack Alert - Hot Lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "options": {}
+      },
+      "id": "faceaefa-5f8a-40a4-a97a-a5fdb8c43f16",
+      "name": "Log Warm/Cold Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Lead Form Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalise Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise Lead": {
+      "main": [
+        [
+          {
+            "node": "AI Score & Qualify (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Score & Qualify (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Result": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead? (score >= 70)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot Lead? (score >= 70)": {
+      "main": [
+        [
+          {
+            "node": "Save Lead to CRM Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Warm/Cold Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Lead to CRM Sheet": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert - Hot Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null
+}
